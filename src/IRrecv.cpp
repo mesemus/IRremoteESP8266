@@ -39,6 +39,10 @@ static void ICACHE_RAM_ATTR read_timeout(void *arg __attribute__((unused))) {
   os_intr_unlock();
 }
 
+extern void pulseStarts();
+extern void pulseToggles();
+extern void pulseStops();
+
 static void ICACHE_RAM_ATTR gpio_intr() {
   uint32_t now = system_get_time();
   uint32_t gpio_status = GPIO_REG_READ(GPIO_STATUS_ADDRESS);
@@ -65,11 +69,13 @@ static void ICACHE_RAM_ATTR gpio_intr() {
   if (irparams.rcvstate == kIdleState) {
     irparams.rcvstate = kMarkState;
     irparams.rawbuf[rawlen] = 1;
+    pulseStarts();
   } else {
     if (now < start)
       irparams.rawbuf[rawlen] = (UINT32_MAX - start + now) / kRawTick;
     else
       irparams.rawbuf[rawlen] = (now - start) / kRawTick;
+    pulseToggles();
   }
   irparams.rawlen++;
 
@@ -160,6 +166,7 @@ void IRrecv::disableIRIn() {
 }
 
 void IRrecv::resume() {
+  pulseStops();
   irparams.rcvstate = kIdleState;
   irparams.rawlen = 0;
   irparams.overflow = false;
