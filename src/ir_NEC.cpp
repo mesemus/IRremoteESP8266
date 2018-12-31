@@ -96,10 +96,11 @@ bool IRrecv::decodeNEC(decode_results *results, uint16_t nbits, bool strict) {
   if (results->rawlen < 2 * nbits + kHeader + kFooter - 1 &&
       results->rawlen != kNecRptLength)
     return false;  // Can't possibly be a valid NEC message.
+
   if (strict && nbits != kNECBits)
     return false;  // Not strictly an NEC message.
 
-  for (uint8_t startPadding=0; startPadding<kNecMaxStartPadding; startPadding++) {
+  for (uint8_t startPadding=0; startPadding<kNecMaxStartPadding+1; startPadding++) {
       uint64_t data = 0;
       uint16_t offset = kStartOffset + startPadding;
 
