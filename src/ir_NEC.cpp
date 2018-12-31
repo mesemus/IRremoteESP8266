@@ -99,71 +99,74 @@ bool IRrecv::decodeNEC(decode_results *results, uint16_t nbits, bool strict) {
   if (strict && nbits != kNECBits)
     return false;  // Not strictly an NEC message.
 
-  uint64_t data = 0;
-  uint16_t offset = kStartOffset;
+  for (uint8_t startPadding=0; startPadding<kNecMaxStartPadding; startPadding++) {
+      uint64_t data = 0;
+      uint16_t offset = kStartOffset + startPadding;
 
-  // Header
-  if (!matchMark(results->rawbuf[offset], kNecHdrMark)) return false;
-  // Calculate how long the lowest tick time is based on the header mark.
-  uint32_t mark_tick = results->rawbuf[offset++] * kRawTick / kNecHdrMarkTicks;
-  // Check if it is a repeat code.
-  if (results->rawlen == kNecRptLength &&
-      matchSpace(results->rawbuf[offset], kNecRptSpace) &&
-      matchMark(results->rawbuf[offset + 1], kNecBitMarkTicks * mark_tick)) {
-    results->value = kRepeat;
-    results->decode_type = NEC;
-    results->bits = 0;
-    results->address = 0;
-    results->command = 0;
-    results->repeat = true;
-    return true;
+      // Header
+      if (!matchMark(results->rawbuf[offset], kNecHdrMark)) continue;
+      // Calculate how long the lowest tick time is based on the header mark.
+      uint32_t mark_tick = results->rawbuf[offset++] * kRawTick / kNecHdrMarkTicks;
+      // Check if it is a repeat code.
+      if (results->rawlen == kNecRptLength &&
+          matchSpace(results->rawbuf[offset], kNecRptSpace) &&
+          matchMark(results->rawbuf[offset + 1], kNecBitMarkTicks * mark_tick)) {
+        results->value = kRepeat;
+        results->decode_type = NEC;
+        results->bits = 0;
+        results->address = 0;
+        results->command = 0;
+        results->repeat = true;
+        return true;
+      }
+
+      // Header (cont.)
+      if (!matchSpace(results->rawbuf[offset], kNecHdrSpace)) continue;
+      // Calculate how long the common tick time is based on the header space.
+      uint32_t space_tick =
+          results->rawbuf[offset++] * kRawTick / kNecHdrSpaceTicks;
+      // Data
+      match_result_t data_result =
+          matchData(&(results->rawbuf[offset]), nbits, kNecBitMarkTicks * mark_tick,
+                    kNecOneSpaceTicks * space_tick, kNecBitMarkTicks * mark_tick,
+                    kNecZeroSpaceTicks * space_tick);
+      if (data_result.success == false) continue;
+      data = data_result.data;
+      offset += data_result.used;
+
+      // Footer
+      if (!matchMark(results->rawbuf[offset++], kNecBitMarkTicks * mark_tick))
+        continue;
+      if (offset < results->rawlen &&
+          !matchAtLeast(results->rawbuf[offset], kNecMinGapTicks * space_tick))
+        continue;
+
+      // Compliance
+      // Calculate command and optionally enforce integrity checking.
+      uint8_t command = (data & 0xFF00) >> 8;
+      // Command is sent twice, once as plain and then inverted.
+      if ((command ^ 0xFF) != (data & 0xFF)) {
+        if (strict) continue;  // Command integrity failed.
+        command = 0;  // The command value isn't valid, so default to zero.
+      }
+
+      // Success
+      results->bits = nbits;
+      results->value = data;
+      results->decode_type = NEC;
+      // NEC command and address are technically in LSB first order so the
+      // final versions have to be reversed.
+      results->command = reverseBits(command, 8);
+      // Normal NEC protocol has an 8 bit address sent, followed by it inverted.
+      uint8_t address = (data & 0xFF000000) >> 24;
+      uint8_t address_inverted = (data & 0x00FF0000) >> 16;
+      if (address == (address_inverted ^ 0xFF))
+        // Inverted, so it is normal NEC protocol.
+        results->address = reverseBits(address, 8);
+      else  // Not inverted, so must be Extended NEC protocol, thus 16 bit address.
+        results->address = reverseBits((data >> 16) & UINT16_MAX, 16);
+      return true;
   }
-
-  // Header (cont.)
-  if (!matchSpace(results->rawbuf[offset], kNecHdrSpace)) return false;
-  // Calculate how long the common tick time is based on the header space.
-  uint32_t space_tick =
-      results->rawbuf[offset++] * kRawTick / kNecHdrSpaceTicks;
-  // Data
-  match_result_t data_result =
-      matchData(&(results->rawbuf[offset]), nbits, kNecBitMarkTicks * mark_tick,
-                kNecOneSpaceTicks * space_tick, kNecBitMarkTicks * mark_tick,
-                kNecZeroSpaceTicks * space_tick);
-  if (data_result.success == false) return false;
-  data = data_result.data;
-  offset += data_result.used;
-
-  // Footer
-  if (!matchMark(results->rawbuf[offset++], kNecBitMarkTicks * mark_tick))
-    return false;
-  if (offset < results->rawlen &&
-      !matchAtLeast(results->rawbuf[offset], kNecMinGapTicks * space_tick))
-    return false;
-
-  // Compliance
-  // Calculate command and optionally enforce integrity checking.
-  uint8_t command = (data & 0xFF00) >> 8;
-  // Command is sent twice, once as plain and then inverted.
-  if ((command ^ 0xFF) != (data & 0xFF)) {
-    if (strict) return false;  // Command integrity failed.
-    command = 0;  // The command value isn't valid, so default to zero.
-  }
-
-  // Success
-  results->bits = nbits;
-  results->value = data;
-  results->decode_type = NEC;
-  // NEC command and address are technically in LSB first order so the
-  // final versions have to be reversed.
-  results->command = reverseBits(command, 8);
-  // Normal NEC protocol has an 8 bit address sent, followed by it inverted.
-  uint8_t address = (data & 0xFF000000) >> 24;
-  uint8_t address_inverted = (data & 0x00FF0000) >> 16;
-  if (address == (address_inverted ^ 0xFF))
-    // Inverted, so it is normal NEC protocol.
-    results->address = reverseBits(address, 8);
-  else  // Not inverted, so must be Extended NEC protocol, thus 16 bit address.
-    results->address = reverseBits((data >> 16) & UINT16_MAX, 16);
-  return true;
+  return false;
 }
 #endif

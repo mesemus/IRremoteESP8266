@@ -42,5 +42,5 @@ const uint16_t kNecMinGapTicks =
     kNecMinCommandLengthTicks -
     (kNecHdrMarkTicks + kNecHdrSpaceTicks +
      kNECBits * (kNecBitMarkTicks + kNecOneSpaceTicks) + kNecBitMarkTicks);
-
+const uint8_t kNecMaxStartPadding = 4;
 #endif  // IR_NEC_H_
